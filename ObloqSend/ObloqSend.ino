@@ -202,3 +202,4 @@ void loop()
     sendMessage("Hy6z0Pb1G",(String)temperature,5000);//每隔5s，向Hy6z0Pb1G设备发送消息，消息内容是此时读取的LM35温度数据
     handleUart();
 }
+
