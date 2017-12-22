@@ -1,0 +1,5 @@
+{
+    "board": "arduino:avr:uno",
+    "sketch": "ObloqSend.ino",
+    "port": "COM16"
+}
