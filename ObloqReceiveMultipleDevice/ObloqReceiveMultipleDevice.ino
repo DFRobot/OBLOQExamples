@@ -166,7 +166,7 @@ void handleUart()
 		{
 			subscribeMqttTopic = false;
         }
-        else if (strstr(obloqMessage, "|4|1|5|") != nullptr)
+        else if (strstr(obloqMessage, "|4|1|5|") != 0)
         {
             splitString(receiveStringIndex,receivedata,"|");
             receiveMessageCallbak(receiveStringIndex[3],receiveStringIndex[4]);
