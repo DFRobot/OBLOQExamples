@@ -10,11 +10,10 @@ const String connectionString = "HostName=iothubDF.azure-devices.net;DeviceId=Fa
 const String separator = "|";
 bool pingOn = true;
 bool createIoTClientSuccess = false;
-static unsigned long previoustGetTempTime = 0;
 static unsigned long pingInterval = 2000;
-static unsigned long sendMessageInterval = 10000;
 unsigned long previousPingTime = 0;
 String receiveStringIndex[10] = {};
+bool subceribeIotDevice = false;
 
 SoftwareSerial softSerial(10,11);
 
@@ -180,6 +179,11 @@ void handleUart()
 			Serial.println("Azure ready");
             obloqState = AZURECONNECT;
 		}
+        else if(strstr(obloqMessage, "|4|2|5|") != 0)
+        {
+            splitString(receiveStringIndex,receivedata,"|");
+            receiveMessageCallbak(receiveStringIndex[3]);
+        }
     }
 }
 
@@ -216,19 +220,16 @@ void execute()
 }
 
 /********************************************************************************************
-Function    : getTemp      
-Description : 获得LM35测得的温度
-Params      : 无
+Function    : receiveMessageCallbak
+Description : 接收消息的回调函数：      
+Params      : message  接收到的消息字符串  
 Return      : 无 
 ********************************************************************************************/
-float getTemp()
+void receiveMessageCallbak(String message)
 {
-    uint16_t val;
-    float dat;
-    val=analogRead(A0);//Connect LM35 on Analog 0
-    dat = (float) val * (5/10.24);
-    return dat;
+    Serial.println("Message content: " + message);
 }
+
 
 void setup()
 {
@@ -241,11 +242,10 @@ void loop()
     sendPing();
     execute();
     handleUart();
-    //每隔5秒发送一次数据
-    if(millis() - previoustGetTempTime > 5000)
+    //监听Azure IOT设备
+    if(!subceribeIotDevice && createIoTClientSuccess)
     {
-        previoustGetTempTime = millis();
-        float temperature = getTemp();
-        publish((String)temperature);
+        subceribeIotDevice = true;
+        subscribeDevice();
     }
 }
