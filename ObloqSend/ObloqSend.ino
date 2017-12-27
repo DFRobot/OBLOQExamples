@@ -2,8 +2,12 @@
 #include <SoftwareSerial.h>
 
 
-#define WIFISSID "DFRobot-guest" 
-#define WIFIPWD  "dfrobot@2017" 
+// #define WIFISSID "DFRobot-guest" 
+// #define WIFIPWD  "dfrobot@2017" 
+
+#define WIFISSID "Smartisan" 
+#define WIFIPWD  "123456789"
+
 #define SERVER   "iot.dfrobot.com.cn"
 #define PORT     1883
 #define IOTID    "r1qHJFJ4Z"
@@ -17,6 +21,13 @@ static unsigned long pingInterval = 2000;
 static unsigned long sendMessageInterval = 10000;
 unsigned long previousPingTime = 0;
 unsigned long previousSendMessageTime = 0;
+
+//wifi异常断开检测变量
+bool wifiConnect = false;
+bool wifiAbnormalDisconnect = false;
+
+//mqtt因为网络断开后重新连接标志
+bool mqttReconnectFlag = false;
 
 SoftwareSerial softSerial(10,11);
 
@@ -74,6 +85,20 @@ void connectMqtt(String server, String port, String iotid, String iotpwd)
     sendMessage(mqttConnectMessage);
 }
 
+
+/********************************************************************************************
+Function    : reconnectMqtt      
+Description : 重新连接DF-IoT    
+Params      : 无 
+Return      : 无 
+********************************************************************************************/
+void reconnectMqtt()
+{
+    String mqttReconnectMessage = "|4|1|5|"; 
+    sendMessage(mqttReconnectMessage);
+}
+
+
 /********************************************************************************************
 Function    : publish      
 Description : 向DF-IoT物联网设备发送信息    
@@ -104,14 +129,34 @@ void handleUart()
 			pingOn = false;
 			obloqState = PINGOK;
 		}
+        if(strcmp(obloqMessage, "|2|1|") == 0)
+        {
+            if(wifiConnect)
+            {
+                wifiConnect = false;
+                wifiAbnormalDisconnect = true;
+            }
+        }
 		else if (strstr(obloqMessage,"|2|3|") != NULL && strlen(obloqMessage) != 9)
 		{
 			Serial.println("Wifi ready");
+            wifiConnect = true;
+            if(wifiAbnormalDisconnect)
+            {
+                wifiAbnormalDisconnect = false;
+                return;
+            }
 			obloqState = WIFIOK;
 		}
 		else if (strcmp(obloqMessage, "|4|1|1|1|") == 0)
 		{
 			Serial.println("Mqtt ready");
+            obloqConnectMqtt = true;
+            if(mqttReconnectFlag)
+            {
+                mqttReconnectFlag = false;
+                return;
+            }
             obloqState = MQTTCONNECTOK;
 		}
     }
@@ -144,33 +189,37 @@ void execute()
     {
         case PINGOK: connectWifi(WIFISSID,WIFIPWD); obloqState = WAIT; break;
         case WIFIOK: connectMqtt(SERVER,String(PORT),IOTID,IOTPWD);obloqState = WAIT; break;
-        case MQTTCONNECTOK : obloqConnectMqtt = true; obloqState = WAIT; break;
+        case MQTTCONNECTOK : obloqState = WAIT; break;
         default: break;
     }
 }
 
 /********************************************************************************************
-Function    : sendMessage(重载)      
-Description : 间隔一段时间（interval），向DF-IoT物联网指定设备(topic)发送消息(message)
-Params      : topic DF-IoT设备编号；message 发送的消息内容；interval 间隔时间(ms)
-Return      : 无 
+Function    : checkWifiState      
+Description : 检查wifi状态,如果检测到wifi热点断开会间隔1分钟去重新连接wifi
+Params      : 无
+Return      : 无
 ********************************************************************************************/
-void sendMessage(String topic,String message,unsigned long interval = 0)
+void checkWifiState()
 {
-    if(obloqConnectMqtt)
+    static unsigned long previousTime = 0;
+    static bool reconnectWifi = false;
+    if(wifiAbnormalDisconnect && millis() - previousTime > 60000)
     {
-        if (interval == 0)
-            publish(topic,message);
-        else
-        {
-            if(millis() - previousSendMessageTime > interval)
-            {
-                previousSendMessageTime = millis();
-                publish(topic,message); 
-                Serial.println(message);
-            }
-        }
-    } 
+        previousTime = millis();
+        Serial.println("Wifi abnormal disconnect");
+        reconnectWifi = true;
+        obloqConnectMqtt = false;
+        connectWifi(WIFISSID,WIFIPWD);
+    }
+    if(!wifiAbnormalDisconnect && reconnectWifi)
+    {
+        reconnectWifi = false;
+        mqttReconnectFlag = true;
+        Serial.println("Reconnect mqtt");
+        reconnectMqtt();
+    }
+
 }
 
 /********************************************************************************************
@@ -198,8 +247,16 @@ void loop()
 {
     sendPing();
     execute();
-    float temperature = getTemp();
-    sendMessage("Hy6z0Pb1G",(String)temperature,5000);//每隔5s，向Hy6z0Pb1G设备发送消息，消息内容是此时读取的LM35温度数据
     handleUart();
-}
+    checkWifiState();
 
+    if(obloqConnectMqtt && millis() - previousSendMessageTime > 5000) //每隔5s，向Hy6z0Pb1G设备发送消息，消息内容是此时读取的LM35温度数据
+    {
+        previousSendMessageTime = millis();
+        //获取温度数据
+        float temperature = getTemp();
+        Serial.println(temperature);
+        publish("Hy6z0Pb1G",(String)temperature); 
+        
+    }
+}

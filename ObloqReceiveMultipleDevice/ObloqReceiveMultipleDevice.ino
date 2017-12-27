@@ -1,8 +1,12 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 
-#define WIFISSID "DFRobot-guest" 
-#define WIFIPWD  "dfrobot@2017" 
+// #define WIFISSID "DFRobot-guest" 
+// #define WIFIPWD  "dfrobot@2017" 
+
+#define WIFISSID "Smartisan" 
+#define WIFIPWD  "123456789" 
+
 #define SERVER   "iot.dfrobot.com.cn"
 #define IOTID    "r1qHJFJ4Z"
 #define IOTPWD   "SylqH1Y1VZ"
@@ -18,6 +22,14 @@ unsigned long previousPingTime = 0;
 unsigned long previousSendMessageTime = 0;
 bool subscribeSuccess = false;
 String receiveStringIndex[10] = {};
+
+//wifi异常断开检测变量
+bool wifiConnect = false;
+bool wifiAbnormalDisconnect = false;
+
+//mqtt因为网络断开后重新连接标志
+bool mqttReconnectFlag = false;
+
 
 SoftwareSerial softSerial(10,11);
 
@@ -77,6 +89,20 @@ void connectMqtt(String server, String port, String iotid, String iotpwd)
     String mqttConnectMessage = "|4|1|1|" + server + separator + port + separator + iotid + separator + iotpwd + separator;
     sendMessage(mqttConnectMessage);
 }
+
+
+/********************************************************************************************
+Function    : reconnectMqtt      
+Description : 重新连接DF-IoT    
+Params      : 无 
+Return      : 无 
+********************************************************************************************/
+void reconnectMqtt()
+{
+    String mqttReconnectMessage = "|4|1|5|"; 
+    sendMessage(mqttReconnectMessage);
+}
+
 
 /********************************************************************************************
 Function    : publish      
@@ -144,27 +170,48 @@ void handleUart()
     {
         String receivedata = softSerial.readStringUntil('\r');
         const char* obloqMessage = receivedata.c_str();
-        Serial.print("receivedata = ");
-        Serial.println(receivedata);
+        // Serial.print("receivedata = ");
+        // Serial.println(receivedata);
         if (strcmp(obloqMessage, "|1|1|") == 0)
 		{
 			Serial.println("Pong");
 			pingOn = false;
 			obloqState = PINGOK;
 		}
+        if(strcmp(obloqMessage, "|2|1|") == 0)
+        {
+            if(wifiConnect)
+            {
+                wifiConnect = false;
+                wifiAbnormalDisconnect = true;
+            }
+        }
 		else if (strstr(obloqMessage,"|2|3|") != NULL && strlen(obloqMessage) != 9)
 		{
 			Serial.println("Wifi ready");
+            wifiConnect = true;
+            if(wifiAbnormalDisconnect)
+            {
+                wifiAbnormalDisconnect = false;
+                return;
+            }
 			obloqState = WIFIOK;
 		}
 		else if (strcmp(obloqMessage, "|4|1|1|1|") == 0)
 		{
 			Serial.println("Mqtt ready");
+            obloqConnectMqtt = true;
+            if(mqttReconnectFlag)
+            {
+                mqttReconnectFlag = false;
+                return;
+            }
             obloqState = MQTTCONNECTOK;
         }
         else if (strcmp(obloqMessage, "|4|1|2|1|") == 0)
 		{
-			subscribeMqttTopic = false;
+			Serial.println("Subscribe successs");
+            subscribeMqttTopic = false;
         }
         else if (strstr(obloqMessage, "|4|1|5|") != 0)
         {
@@ -202,40 +249,14 @@ void execute()
     {
         case PINGOK: connectWifi(WIFISSID,WIFIPWD); obloqState = WAIT; break;
         case WIFIOK: connectMqtt(SERVER,String(PORT),IOTID,IOTPWD);obloqState = WAIT; break;
-        case MQTTCONNECTOK : obloqConnectMqtt = true; obloqState = WAIT; break;
+        case MQTTCONNECTOK : obloqState = WAIT; break;
         default: break;
     }
 }
 
 /********************************************************************************************
-Function    : subscribeTopic      
-Description : 需要监听多个DF-IoT物联网设备时，运行一次注册一个设备 
-Params      : 无
-Return      : 无 
-********************************************************************************************/
-void subscribeTopic()
-{
-    static int num = 1 ;
-    if(!subscribeSuccess && !subscribeMqttTopic && obloqConnectMqtt)
-    {
-        subscribeMqttTopic = true;
-        switch(num)
-        {
-            //subscribe()内是监听的设备的topic
-            case 1:subscribe("Hy6z0Pb1G");num++;break;
-            case 2:subscribe("S1pMPGNRb");num++;break;
-            case 3:subscribe("rydv8Kv-G");num++;break;
-            case 4:subscribe("SycPItDZG");num++;break;
-            case 5:subscribe("H1xdUtPZG");num++; subscribeSuccess = true;break;
-            default:break;
-        }
-    }    
-}
-
-
-/********************************************************************************************
 Function    : subscribeMultipleTopic      
-Description : 监听多个DF-IoT物联网设备，本例中注册了5个设备 
+Description : 监听多个DF-IoT物联网设备，本例中注册了3个设备 
 Params      : 无
 Return      : 无 
 ********************************************************************************************/
@@ -260,6 +281,27 @@ void subscribeMultipleTopic()
     }    
 }
 
+void checkWifiState()
+{
+    static unsigned long previousTime = 0;
+    static bool reconnectWifi = false;
+    if(wifiAbnormalDisconnect && millis() - previousTime > 60000)
+    {
+        previousTime = millis();
+        reconnectWifi = true;
+        obloqConnectMqtt = false;
+        Serial.println("Wifi abnormal disconnect");
+        connectWifi(WIFISSID,WIFIPWD);
+    }
+    if(!wifiAbnormalDisconnect && reconnectWifi)
+    {
+        reconnectWifi = false;
+        mqttReconnectFlag = true;
+        Serial.println("Reconnect mqtt");
+        reconnectMqtt();
+    }
+}
+
 void setup()
 {
     Serial.begin(9600);
@@ -273,4 +315,6 @@ void loop()
     //监听多个Iot设备，需要将监听的多个topic放入数组topicStore[]中，一个OBLOQ最多监听5个Topic
     subscribeMultipleTopic();
     handleUart();
+    checkWifiState();
 }
+

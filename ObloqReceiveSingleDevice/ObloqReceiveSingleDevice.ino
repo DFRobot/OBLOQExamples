@@ -20,6 +20,14 @@ unsigned long previousPingTime = 0;
 bool subscribeSuccess = false;
 String receiveStringIndex[10] = {};
 
+//wifi异常断开检测变量
+bool wifiConnect = false;
+bool wifiAbnormalDisconnect = false;
+
+//mqtt因为网络断开后重新连接标志
+bool mqttReconnectFlag = false;
+
+
 SoftwareSerial softSerial(10,11);
 
 enum state{
@@ -74,6 +82,18 @@ void connectMqtt(String server, String port, String iotid, String iotpwd)
 {
     String mqttConnectMessage = "|4|1|1|" + server + separator + port + separator + iotid + separator + iotpwd + separator;
     sendMessage(mqttConnectMessage);
+}
+
+/********************************************************************************************
+Function    : reconnectMqtt      
+Description : 重新连接DF-IoT    
+Params      : 无 
+Return      : 无 
+********************************************************************************************/
+void reconnectMqtt()
+{
+    String mqttReconnectMessage = "|4|1|5|"; 
+    sendMessage(mqttReconnectMessage);
 }
 
 /********************************************************************************************
@@ -137,14 +157,34 @@ void handleUart()
 			pingOn = false;
 			obloqState = PINGOK;
 		}
+        if(strcmp(obloqMessage, "|2|1|") == 0)
+        {
+            if(wifiConnect)
+            {
+                wifiConnect = false;
+                wifiAbnormalDisconnect = true;
+            }
+        }
         else if (strstr(obloqMessage,"|2|3|") != NULL && strlen(obloqMessage) != 9)
 		{
 			Serial.println("Wifi ready");
+            wifiConnect = true;
+            if(wifiAbnormalDisconnect)
+            {
+                wifiAbnormalDisconnect = false;
+                return;
+            }
 			obloqState = WIFIOK;
 		}
 		else if (strcmp(obloqMessage, "|4|1|1|1|") == 0)
 		{
 			Serial.println("Mqtt ready");
+            obloqConnectMqtt = true;
+            if(mqttReconnectFlag)
+            {
+                mqttReconnectFlag = false;
+                return;
+            }
             obloqState = MQTTCONNECTOK;
         }
         else if (strcmp(obloqMessage, "|4|1|2|1|") == 0)
@@ -189,7 +229,7 @@ void execute()
     {
         case PINGOK: connectWifi(WIFISSID,WIFIPWD); obloqState = WAIT; break;
         case WIFIOK: connectMqtt(SERVER,String(PORT),IOTID,IOTPWD);obloqState = WAIT; break;
-        case MQTTCONNECTOK : obloqConnectMqtt = true; obloqState = WAIT; break;
+        case MQTTCONNECTOK :  obloqState = WAIT; break;
         default: break;
     }
 }
@@ -207,6 +247,33 @@ void subscribeSingleTopic(String topic)
         subscribeMqttTopic = true;
         subscribe(topic);
     }    
+}
+
+/********************************************************************************************
+Function    : checkWifiState      
+Description : 检查wifi状态
+Params      : 无
+Return      : 无 
+********************************************************************************************/
+void checkWifiState()
+{
+    static unsigned long previousTime = 0;
+    static bool reconnectWifi = false;
+    if(wifiAbnormalDisconnect && millis() - previousTime > 60000)
+    {
+        previousTime = millis();
+        reconnectWifi = true;
+        obloqConnectMqtt = false;
+        Serial.println("Wifi abnormal disconnect");
+        connectWifi(WIFISSID,WIFIPWD);
+    }
+    if(!wifiAbnormalDisconnect && reconnectWifi)
+    {
+        reconnectWifi = false;
+        mqttReconnectFlag = true;
+        Serial.println("Reconnect mqtt");
+        reconnectMqtt();
+    }
 }
 
 /********************************************************************************************
@@ -234,4 +301,5 @@ void loop()
     execute();
     subscribeSingleTopic("Hy6z0Pb1G");
     handleUart();
+    checkWifiState();
 }

@@ -16,6 +16,10 @@ static unsigned long sendMessageInterval = 10000;
 unsigned long previousPingTime = 0;
 String receiveStringIndex[10] = {};
 
+//wifi异常断开检测变量
+bool wifiConnect = false;
+bool wifiAbnormalDisconnect = false;
+
 SoftwareSerial softSerial(10,11);
 
 enum state{
@@ -170,14 +174,30 @@ void handleUart()
 			pingOn = false;
 			obloqState = PINGOK;
 		}
+        if(strcmp(obloqMessage, "|2|1|") == 0)
+        {
+            if(wifiConnect)
+            {
+                wifiConnect = false;
+                wifiAbnormalDisconnect = true;
+            }
+        }
 		else if(strstr(obloqMessage, "|2|3|") != 0 && strlen(obloqMessage) != 9)
 		{
 			Serial.println("Wifi ready");
+            wifiConnect = true;
+            if(wifiAbnormalDisconnect)
+            {
+                wifiAbnormalDisconnect = false;
+                createIoTClientSuccess = true;
+                return; 
+            }
 			obloqState = WIFIOK;
 		}
 		else if(strcmp(obloqMessage, "|4|2|1|1|") == 0)
 		{
 			Serial.println("Azure ready");
+            createIoTClientSuccess = true;
             obloqState = AZURECONNECT;
 		}
     }
@@ -210,7 +230,7 @@ void execute()
     {
         case PINGOK: connectWifi(WIFISSID,WIFIPWD); obloqState = WAIT; break;
         case WIFIOK: createIoTClient(connectionString);obloqState = WAIT; break;
-        case AZURECONNECT : createIoTClientSuccess = true; obloqState = WAIT; break;
+        case AZURECONNECT : obloqState = WAIT; break;
         default: break;
     }
 }
@@ -230,6 +250,23 @@ float getTemp()
     return dat;
 }
 
+/********************************************************************************************
+Function    : checkWifiState 
+Description : 接收消息的回调函数：      
+Params      : message  接收到的消息字符串  
+Return      : 无 
+********************************************************************************************/
+void checkWifiState()
+{
+    static unsigned long previousTime = 0;
+    if(wifiAbnormalDisconnect && millis() - previousTime > 60000)  //wifi异常断开后一分钟重连一次
+    {
+        previousTime = millis();
+        createIoTClientSuccess = false;
+        connectWifi(WIFISSID,WIFIPWD);
+    }
+}
+
 void setup()
 {
     Serial.begin(9600);
@@ -241,11 +278,15 @@ void loop()
     sendPing();
     execute();
     handleUart();
+    checkWifiState();
     //每隔5秒发送一次数据
-    if(millis() - previoustGetTempTime > 5000)
+    if(createIoTClientSuccess && millis() - previoustGetTempTime > 5000)
     {
         previoustGetTempTime = millis();
+
+        //获取温度传感器数据
         float temperature = getTemp();
         publish((String)temperature);
+        Serial.println(temperature);
     }
 }
