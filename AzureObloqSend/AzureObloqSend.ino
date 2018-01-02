@@ -2,11 +2,12 @@
 #include <SoftwareSerial.h>
 
 
+//wifi账号和密码
 #define WIFISSID "DFRobot-guest" 
 #define WIFIPWD  "dfrobot@2017" 
 
 //Azure IOT 设备连接字符串,连接不同的设备需要修改这个字符串
-const String connectionString = "HostName=iothubDF.azure-devices.net;DeviceId=FactoryDevice;SharedAccessKey=NHR4DHP5lmyrZ750E8BIyLmnFrs5Hq0NKRx3siR1zp8=";
+const String connectionString = "HostName=dfrobot.azure-devices.cn;DeviceId=temperature;SharedAccessKey=CR5gUclNaT7skX9WP+e6oIB/BnkZnTIEReKBX870SNY=";
 const String separator = "|";
 bool pingOn = true;
 bool createIoTClientSuccess = false;
